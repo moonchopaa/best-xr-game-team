@@ -1,7 +1,7 @@
 'use strict';
 (()=>{
  const toggle=document.getElementById('musicToggle'),slider=document.getElementById('musicVolume'),status=document.getElementById('musicStatus'),effects=document.getElementById('soundToggle');
- const music=new Audio('/starlight.wav');music.loop=true;music.preload='auto';
+ const music=new Audio('/starlight.wav');music.loop=true;music.preload='metadata';
  let enabled=true,volume=.5,sound=true,attempting=false,activated=false,clickContext;
  try{const s=JSON.parse(localStorage.getItem('sip-audio-v2')||'null');if(s){enabled=s.enabled!==false;sound=s.sound!==false;if(Number.isFinite(s.volume))volume=Math.max(0,Math.min(1,s.volume));}}catch{}
  function save(){try{localStorage.setItem('sip-audio-v2',JSON.stringify({enabled,volume,sound}));}catch{}}

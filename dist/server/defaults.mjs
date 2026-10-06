@@ -68,7 +68,6 @@ export default {
     "nodes:boboAir": "/place-pond.jpg",
     "nodes:boboMusic": "/place-pond.jpg",
     "nodes:boboWin": "/place-pond.jpg",
-    "nodes:energy": "/place-cafe.jpg",
     "nodes:milk": "/place-river.jpg",
     "nodes:cows": "/place-river.jpg",
     "nodes:cowRetry": "/place-river.jpg",
@@ -79,9 +78,7 @@ export default {
     "nodes:mapleBye": "/place-maple.jpg",
     "nodes:mapleWin": "/place-maple.jpg",
     "nodes:finish": "/place-home.jpg",
-    "nodes:endCoffee": "/place-maple.jpg",
     "nodes:ending": "/place-home.jpg",
-    "nodes:recovery": "/recovery.png",
     "endings:maple": "/place-home.jpg",
     "endings:clear": "/place-home.jpg",
     "endings:classic": "/place-home.jpg"
