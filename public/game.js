@@ -30,7 +30,17 @@ $('restart').onclick=()=>{openModal("Start your journey again?");const p=documen
 document.addEventListener('keydown',e=>{if(!ready||$('modal').open||$('menuModal').open||$('journalModal').open||e.repeat||e.ctrlKey||e.altKey||e.metaKey||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;if((e.code==='Space'||e.key===' ')&&typing){e.preventDefault();finishLine();return;}const i=Number(e.key)-1;if(['1','2','3','4'].includes(e.key)&&current().choices?.[i]){e.preventDefault();choose(i);}});
 if(document.modelContext?.registerTool){for(const tool of [{name:'read_dialogue_game',description:"Read the current dialogue, ingredients, choices, and ending status.",inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>snapshot()},{name:'choose_dialogue',description:"Choose a zero-based option from the current dialogue and advance the story.",inputSchema:{type:'object',properties:{index:{type:'integer',minimum:0,maximum:3}},required:['index'],additionalProperties:false},annotations:{readOnlyHint:false},execute:input=>{if(!input||Object.keys(input).some(k=>k!=='index'))throw new Error("Provide only an index.");return choose(input.index);}}]){try{Promise.resolve(document.modelContext.registerTool(tool)).catch(()=>{});}catch{}}}
 
-async function loadStory(){for(const id of ['characters','history','restart','journal'])$(id).disabled=true;$('line').textContent='Loading the story…';try{const response=await fetch('/api/story',{cache:'no-store'});if(!response.ok)throw new Error('Could not load the saved story.');const {content}=await response.json();({cast,chapters,items,nodes,endings}=content);defaultImage=content.image;ready=true;render();for(const id of ['characters','history','restart','journal'])$(id).disabled=false;}catch(error){$('line').textContent='The story could not be loaded. Please try again.';const retry=document.createElement('button');retry.className='choice';retry.textContent='Try again';retry.onclick=()=>{$('choices').replaceChildren();loadStory();};$('choices').replaceChildren(retry);}}
+async function loadStory(){
+ ready=false;$('gameStage').hidden=true;$('loadingScreen').hidden=false;$('loadingRetry').hidden=true;$('loadingMessage').textContent='Opening your story…';
+ try{
+  const response=await fetch('/api/story',{cache:'no-store'});if(!response.ok)throw new Error('Could not load the saved story.');
+  const {content}=await response.json();({cast,chapters,items,nodes,endings}=content);defaultImage=content.image;
+  const art=$('sceneArt');art.src=artworkUrl(current().image||defaultImage);art.alt=current().imageAlt||'Illustration for '+current().title;
+  let timeout;try{await Promise.race([art.decode(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Image load timed out')),20000);})]);}finally{clearTimeout(timeout);}
+  ready=true;render();$('loadingScreen').hidden=true;$('gameStage').hidden=false;
+ }catch(error){ready=false;$('loadingMessage').textContent='The opening scene could not load. Please try again.';$('loadingRetry').hidden=false;}
+}
+$('loadingRetry').onclick=loadStory;
 
 let typingFrame=null,typing=false,fullLine='';
 function finishLine(){if(typingFrame!==null&&typeof clearTimeout==='function')clearTimeout(typingFrame);typingFrame=null;typing=false;$('line').textContent=fullLine;$('reveal').hidden=true;$('listenHint').hidden=false;}
