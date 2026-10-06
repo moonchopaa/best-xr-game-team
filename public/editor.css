@@ -2,3 +2,9 @@
 .scene-settings{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:15px}.scene-settings>div:last-child{grid-column:1/-1}.scene-settings label{margin-top:0}.scene-delete{border-top:1px solid var(--line);margin-top:25px;padding-top:18px}.scene-delete button{color:#edbba4}.choice-tools{display:flex;justify-content:space-between;align-items:center;gap:10px}.choice-tools h4{margin:0;font-size:16px;color:var(--gold)}.choice-tools button{font-size:13px;padding:5px 10px}.choice-effects{display:grid;grid-template-columns:1fr 1fr;gap:12px}#addScene{width:100%;margin-top:8px}#addChoice{margin-top:15px}#connectionInfo{border-left:2px solid #b89966;padding:8px 12px;background:#233e37;font-size:14px}.preview-choice{display:block;width:100%;text-align:left;color:var(--ink);background:#203b36;cursor:pointer}.preview-choice small{display:block;color:var(--gold);margin-top:4px;font-size:12px}.preview-choice:hover{border-color:var(--gold)}button:disabled{opacity:.45;cursor:not-allowed}.scene-button.unconnected:after{content:' · not reachable from start';font-size:11px;color:#c4ab7e}@media(max-width:760px){.scene-settings{grid-template-columns:1fr}.scene-settings>div:last-child{grid-column:auto}.choice-effects{grid-template-columns:1fr}}
 
 .scene-order-tools{display:flex;gap:8px;margin-top:10px}.scene-order-tools button{flex:1;padding:10px 6px}.scene-chapter{display:block;font-size:13px;line-height:1.5;color:var(--gold);margin-bottom:4px}.scene-button span{display:block}
+
+/* Voice clip upload, matching the scene image controls above it. */
+.voice-controls{margin-top:25px}
+.voice-controls h3{font-size:18px}
+.voice-controls .secondary{margin:8px 0}
+.voice-controls audio{display:block;width:100%;margin:10px 0}

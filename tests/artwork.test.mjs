@@ -4,7 +4,8 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const source = await readFile(new URL('../public/game.js', import.meta.url), 'utf8');
-const helpers = source.slice(source.indexOf('function artworkUrl('));
+// Bounded on both sides so unrelated additions to game.js cannot leak in here.
+const helpers = source.slice(source.indexOf('function artworkUrl('), source.indexOf('// --- end of artwork helpers ---'));
 const loader = source.slice(source.indexOf('async function loadStory('), source.indexOf("$('loadingRetry').onclick"));
 function fixture() {
  const elements = new Map();
