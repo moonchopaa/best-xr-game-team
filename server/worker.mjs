@@ -64,6 +64,7 @@ function audioType(bytes){if(bytes.length<12)return null;const ascii=(start,end)
 async function handle(request,env){const url=new URL(request.url),path=url.pathname;
 if(path.startsWith('/api/')&&!['GET','HEAD'].includes(request.method)){if(request.headers.get('Origin')!==url.origin||request.headers.get('X-Editor-Request')!=='1')return json({error:'This request must come from the editor.'},403);}
 if(path==='/api/story'&&request.method==='GET')return json(await story(env));
+if(path==='/api/story/original'&&request.method==='GET')return json({content:defaults});
 if(path==='/api/editor/session'&&request.method==='GET')return json({authenticated:await authenticated(request,env)});
 if(path==='/api/editor/login'&&request.method==='POST'){
  if(!env.EDITOR_PASSWORD||!env.EDITOR_SESSION_SECRET)return json({error:'The editor is not configured yet.'},503);

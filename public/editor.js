@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);let story=null,revision=0,dirty=false,bu
 async function api(path,options={}){const response=await fetch(path,{...options,cache:'no-store',headers:{'X-Editor-Request':'1',...options.headers}});let data;try{data=await response.json();}catch{throw new Error('The server could not be reached. Your draft is still here.');}if(!response.ok){const error=new Error(data.error||'The request failed.');error.status=response.status;error.conflict=data.conflict;throw error;}return data;}
 function notice(message,error=false){$('notice').textContent=message;$('notice').className=error?'error':'';}
 function markDirty(){dirty=true;$('saveState').textContent='Unsaved changes';$('save').disabled=busy;}
-function setBusy(value){busy=value;$('save').disabled=value||!dirty;$('reload').disabled=value;$('sceneFile').disabled=value;$('voiceFile').disabled=value;$('lock').disabled=value;for(const el of $('sceneForm').elements)el.disabled=value;$('sceneSelect').disabled=value;for(const button of $('sceneButtons').querySelectorAll('button'))button.disabled=value;$('addScene').disabled=value;$('moveSceneUp').disabled=value;$('moveSceneDown').disabled=value;if(!value&&story)updateControls();}
+function setBusy(value){busy=value;$('save').disabled=value||!dirty;$('reload').disabled=value;$('sceneFile').disabled=value;$('voiceFile').disabled=value;$('importFile').disabled=value;$('exportStory').disabled=value;$('resetStory').disabled=value;$('lock').disabled=value;for(const el of $('sceneForm').elements)el.disabled=value;$('sceneSelect').disabled=value;for(const button of $('sceneButtons').querySelectorAll('button'))button.disabled=value;$('addScene').disabled=value;$('moveSceneUp').disabled=value;$('moveSceneDown').disabled=value;if(!value&&story)updateControls();}
 function selected(){const [group,id]=selection.split(':');return story[group][id];}
 function reachableScenes(){const seen=new Set(),queue=['start'];while(queue.length){const id=queue.pop();if(seen.has(id))continue;seen.add(id);if(id==='ending'&&story.nodes.scene_9634fffd222c4e74958ef0732ebb5450?.end)queue.push('scene_9634fffd222c4e74958ef0732ebb5450');for(const choice of story.nodes[id]?.choices||[])queue.push(choice.next);}return seen;}
 function destinationName(id){if(id==='ending')return 'Recipe ending (based on ingredients)';if(id.startsWith('ending:'))return story.endings[id.slice(7)]?.title||'Missing ending';return story.nodes[id]?.title||'Choose a destination';}
@@ -15,7 +15,11 @@ function buildEntries(){
  for(const [id,n]of Object.entries(story.endings))all.push({key:'endings:'+id,label:n.title,chapter:chapterInfo(n)+' · Ending'});
  const byKey=new Map(all.map(e=>[e.key,e]));const order=[...new Set([...(story.sceneOrder||[]),...byKey.keys()])].filter(key=>byKey.has(key));story.sceneOrder=order;entries=order.map(key=>byKey.get(key));
  $('sceneSelect').replaceChildren();$('sceneButtons').replaceChildren();
- for(const entry of entries){const option=document.createElement('option');option.value=entry.key;option.textContent=entry.chapter+' — '+entry.label;$('sceneSelect').append(option);const button=document.createElement('button');button.className='scene-button'+(entry.unconnected?' unconnected':'')+(entry.key===selection?' selected':'');button.dataset.key=entry.key;const chapter=document.createElement('small');chapter.className='scene-chapter';chapter.textContent=entry.chapter;const title=document.createElement('span');title.textContent=entry.label;button.append(chapter,title);button.onclick=()=>select(entry.key);$('sceneButtons').append(button);}
+ const term=$('sceneSearch').value.trim().toLowerCase();
+ const matches=entry=>{if(!term)return true;const [group,id]=entry.key.split(':');const scene=story[group][id];return [entry.label,entry.chapter,scene.line,scene.narration,scene.loc,scene.speaker].some(value=>typeof value==='string'&&value.toLowerCase().includes(term));};
+ let shown=0;
+ for(const entry of entries){const option=document.createElement('option');option.value=entry.key;option.textContent=entry.chapter+' — '+entry.label;$('sceneSelect').append(option);if(!matches(entry))continue;shown++;const button=document.createElement('button');button.className='scene-button'+(entry.unconnected?' unconnected':'')+(entry.key===selection?' selected':'');button.dataset.key=entry.key;const chapter=document.createElement('small');chapter.className='scene-chapter';chapter.textContent=entry.chapter;const title=document.createElement('span');title.textContent=entry.label;button.append(chapter,title);button.onclick=()=>select(entry.key);$('sceneButtons').append(button);}
+ $('sceneCount').textContent=term?shown+' of '+entries.length+' scenes match “'+term+'”':entries.length+' scenes';
  $('sceneSelect').value=selection;
 }
 function moveScene(offset){if(busy||!story)return;const index=story.sceneOrder.indexOf(selection),target=index+offset;if(index<0||target<0||target>=story.sceneOrder.length)return;[story.sceneOrder[index],story.sceneOrder[target]]=[story.sceneOrder[target],story.sceneOrder[index]];markDirty();buildEntries();renderChoices();preview();updateControls();const button=[...$('sceneButtons').children].find(b=>b.dataset.key===selection);button?.scrollIntoView({block:'nearest'});notice('Scene order updated. Save changes to keep this order.');}
@@ -51,6 +55,7 @@ function updateControls() {
   : 'Only this scene will be deleted. Uploaded images are kept.';
  $('addScene').disabled = busy || Object.keys(story.nodes).length >= 120;
  $('removeVoice').disabled = busy || !scene.voice;
+ $('duplicateScene').disabled = busy || group === 'endings' || Object.keys(story.nodes).length >= 120;
  const reachable = reachableScenes();
  $('connectionInfo').textContent = id === 'scene_9634fffd222c4e74958ef0732ebb5450'
   ? 'Recipe ending · Tea, Milk, and Maple collected, without Boba.'
@@ -97,4 +102,67 @@ else if(type==='image'){const next=scene.choices?.[0]?.next||choiceDrafts.get(se
 else{delete scene.end;delete scene.type;scene.choices=choiceDrafts.get(selection)?.length?structuredClone(choiceDrafts.get(selection)):[{text:'Continue',next:scene.choices?.[0]?.next||nextOrderedTarget()}];}
 markDirty();buildEntries();select(selection);};
 $('deleteScene').onclick=()=>{const [group,id]=selection.split(':');if(busy||group!=='nodes'||id==='start'||incoming(id).length)return;if(!confirm('Delete “'+(selected().title||'Untitled scene')+'”? This takes effect when you save.'))return;delete story.nodes[id];selection='nodes:start';markDirty();buildEntries();select(selection);notice('Scene removed from your draft. Save changes to publish.');};
+// Backup, restore and search. None of these publish anything on their own:
+// they fill in the draft, and the editor still has to save it.
+$('sceneSearch').oninput=()=>{if(story)buildEntries();};
+
+function loadDraft(content,message){
+ story=content;
+ if(!Array.isArray(story.sceneOrder))story.sceneOrder=[];
+ const [group,id]=selection.split(':');
+ if(!story[group]?.[id])selection='nodes:start';
+ markDirty();buildEntries();
+ select(entries.some(entry=>entry.key===selection)?selection:'nodes:start');
+ const problem=validateDraft();
+ if(problem){select(problem.key);notice(message+' One thing to fix before saving: '+problem.message,true);}
+ else notice(message);
+}
+
+$('exportStory').onclick=()=>{
+ if(!story||busy)return;
+ const name='a-sip-of-home-'+new Date().toISOString().slice(0,10)+'.json';
+ const url=URL.createObjectURL(new Blob([JSON.stringify(story,null,2)],{type:'application/json'}));
+ const link=document.createElement('a');link.href=url;link.download=name;
+ document.body.append(link);link.click();link.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),10000);
+ notice('Saved '+name+' to your downloads. It includes any unsaved changes in this draft.');
+};
+
+async function importStory(input){
+ const file=input.files?.[0];
+ if(!file||busy||!story){input.value='';return;}
+ if(dirty&&!confirm('Replace your draft with this backup? Your unsaved changes will be lost.')){input.value='';return;}
+ try{
+  const data=JSON.parse(await file.text());
+  const content=data&&typeof data==='object'&&!data.nodes&&data.content?data.content:data;
+  if(!content||typeof content!=='object'||!content.nodes||!content.endings)throw new Error('That file is not a story backup.');
+  if(!content.nodes.start)throw new Error('That backup has no opening scene, so the game could not start.');
+  loadDraft(content,'Backup loaded into your draft. Review it, then save to publish.');
+ }catch(error){notice(error instanceof SyntaxError?'That file is not valid JSON.':error.message||'That file could not be read.',true);}
+ finally{input.value='';}
+}
+$('importFile').onchange=()=>importStory($('importFile'));
+
+$('resetStory').onclick=async()=>{
+ if(busy||!story)return;
+ if(!confirm('Reset your draft to the original story? Your current draft will be replaced. Nothing changes for players until you save.'))return;
+ setBusy(true);notice('Loading the original story…');
+ try{const data=await api('/api/story/original');loadDraft(data.content,'Original story loaded into your draft. Save to publish it.');}
+ catch(error){notice(error.message,true);}
+ finally{setBusy(false);}
+};
+
+$('duplicateScene').onclick=()=>{
+ const [group,id]=selection.split(':');
+ if(busy||!story||group!=='nodes'||id==='ending'||Object.keys(story.nodes).length>=120)return;
+ const copy=structuredClone(selected());
+ copy.title=(copy.title||'Untitled scene')+' (copy)';
+ const newId='scene_'+crypto.randomUUID().replaceAll('-','');
+ story.nodes[newId]=copy;
+ const order=orderedSceneKeys();order.splice(order.indexOf(selection)+1,0,'nodes:'+newId);story.sceneOrder=order;
+ selection='nodes:'+newId;markDirty();buildEntries();select(selection);
+ notice('Scene duplicated. Nothing leads to the copy yet — point a choice at it to bring it into the story.');
+ $('title').focus();$('title').select();
+};
+
 function validateDraft(){for(const group of ['nodes','endings'])for(const [id,scene]of Object.entries(story[group])){if(group==='nodes'&&id==='ending')continue;const key=group+':'+id;if(!scene.title?.trim()||(scene.type!=='image'&&!scene.line?.trim()))return {key,message:'Add a title and dialogue to “'+(scene.title||'Untitled scene')+'” before saving.'};if(!scene.end&&group==='nodes'){if(!scene.choices?.length||scene.choices.length>3)return {key,message:'Add 1–3 choices, or make this scene an ending.'};for(const choice of scene.choices){if(!choice.text?.trim())return {key,message:'Write the text for every choice.'};if(!Object.hasOwn(story.nodes,choice.next)&&!(choice.next?.startsWith('ending:')&&Object.hasOwn(story.endings,choice.next.slice(7))))return {key,message:'Choose a valid destination for every choice.'};}}}return null;}

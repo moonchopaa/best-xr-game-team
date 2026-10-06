@@ -136,3 +136,21 @@ test('uploaded audio is recognised by its header, not its file name', () => {
   // A JPEG also starts with 0xff, so it must not be mistaken for an MP3 frame.
   assert.equal(header([0xff, 0xd8, 0xff]), null);
 });
+
+test('the original story stays available after the saved story is replaced', async () => {
+  const wrecked = draft();
+  wrecked.nodes.start.title = 'Replaced';
+  const env = { DB: { prepare: () => ({ first: async () => ({
+    revision: 4, content: JSON.stringify(wrecked), updated_at: '2026-01-01T00:00:00Z',
+  }) }) } };
+
+  const saved = await (await worker.fetch(new Request('https://example.test/api/story'), env)).json();
+  assert.equal(saved.content.nodes.start.title, 'Replaced');
+
+  const original = await worker.fetch(new Request('https://example.test/api/story/original'), env);
+  assert.equal(original.status, 200);
+  const body = await original.json();
+  assert.equal(body.content.nodes.start.title, defaults.nodes.start.title);
+  // It is a restore source, not a save: it carries no revision to save against.
+  assert.equal(body.revision, undefined);
+});
