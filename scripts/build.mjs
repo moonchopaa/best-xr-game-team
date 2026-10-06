@@ -1,0 +1,6 @@
+import {execFileSync} from 'node:child_process';
+for(const path of ['server/worker.mjs','public/game.js','public/editor.js','public/music.js'])execFileSync(process.execPath,['--check',path]);
+import {readFile,writeFile,mkdir,rm,cp,readdir} from 'node:fs/promises';
+await rm('dist',{recursive:true,force:true});await mkdir('dist/server',{recursive:true});await mkdir('dist/.openai',{recursive:true});
+const types={html:'text/html; charset=utf-8',css:'text/css; charset=utf-8',js:'text/javascript; charset=utf-8',png:'image/png',jpg:'image/jpeg',wav:'audio/wav'};const assets={};for(const name of await readdir('public')){const ext=name.split('.').pop();if(!types[ext])continue;const bytes=await readFile('public/'+name);assets['/'+name]={body:['png','jpg','wav'].includes(ext)?bytes.toString('base64'):bytes.toString('utf8'),base64:['png','jpg','wav'].includes(ext),type:types[ext]};}
+await writeFile('dist/server/assets.mjs','export default '+JSON.stringify(assets)+';\n');await writeFile('dist/server/defaults.mjs','export default '+await readFile('server/default-story.json','utf8')+';\n');await cp('server/worker.mjs','dist/server/index.js');await cp('.openai/hosting.json','dist/.openai/hosting.json');await cp('drizzle','dist/.openai/drizzle',{recursive:true});console.log('Built game and shared editor.');
