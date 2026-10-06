@@ -9,9 +9,10 @@ async function key(secret){return crypto.subtle.importKey('raw',encoder.encode(s
 async function signed(payload,secret){return hex(await crypto.subtle.sign('HMAC',await key(secret),encoder.encode(payload)));}
 async function equal(a,b){const [aHash,bHash]=await Promise.all([digest(a),digest(b)]);let difference=0;for(let i=0;i<aHash.length;i++)difference|=aHash.charCodeAt(i)^bHash.charCodeAt(i);return difference===0;}
 async function authenticated(request,env){if(!env.EDITOR_SESSION_SECRET)return false;const token=(request.headers.get('Cookie')||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'='))?.slice(cookieName.length+1);if(!token)return false;const [expiry,nonce,sig,...extra]=token.split('.');if(extra.length||!/^\d+$/.test(expiry)||!/^[-a-zA-Z0-9]+$/.test(nonce||'')||!/^[a-f0-9]{64}$/.test(sig||'')||Number(expiry)<Date.now()||Number(expiry)>Date.now()+43201000)return false;const bytes=new Uint8Array(sig.match(/../g).map(x=>parseInt(x,16)));return crypto.subtle.verify('HMAC',await key(env.EDITOR_SESSION_SECRET),bytes,encoder.encode(expiry+'.'+nonce));}
-function imagePath(value){return typeof value==='string'&&(['/scene.png','/recovery.png',...Object.values(defaults.sceneImages)].includes(value)||/^\/media\/[a-f0-9-]{36}$/.test(value));}
+function imagePath(value){return typeof value==='string'&&((Object.hasOwn(assets,value)&&assets[value].type.startsWith('image/'))||/^\/media\/[a-f0-9-]{36}$/.test(value));}
 function sceneOrder(content){const keys=[...Object.keys(content.nodes).filter(id=>id!=='ending').map(id=>'nodes:'+id),...Object.keys(content.endings).map(id=>'endings:'+id)];return [...new Set([...(Array.isArray(content.sceneOrder)?content.sceneOrder:[]),...keys])].filter(key=>keys.includes(key));}
-function withRecovery(content){content=structuredClone(content);delete content.nodes.recovery;for(const group of ['nodes','endings'])for(const scene of Object.values(content[group]))for(const choice of scene.choices||[])delete choice.energy;content.sceneOrder=sceneOrder(content);return content;}
+// Compatibility for saved stories from the retired energy/recovery edition.
+function migrateLegacyStory(content){content=structuredClone(content);delete content.nodes.recovery;for(const group of ['nodes','endings'])for(const scene of Object.values(content[group]))for(const choice of scene.choices||[])delete choice.energy;content.sceneOrder=sceneOrder(content);return content;}
 function validateStory(input){
  if(!input||typeof input!=='object'||Array.isArray(input))throw new Error('Invalid story.');
  if(!imagePath(input.image))throw new Error('Choose a valid uploaded image.');
@@ -19,12 +20,12 @@ function validateStory(input){
  const text=(value,max,required=false,label='Text')=>{if(typeof value!=='string'||value.length>max||(required&&!value.trim()))throw new Error(label+' is empty or too long.');return value;};
  const object=value=>value&&typeof value==='object'&&!Array.isArray(value);
  if(!object(input.nodes)||!object(input.endings))throw new Error('The story needs scenes and endings.');
- input=withRecovery(input);
+ input=migrateLegacyStory(input);
  const keys=Object.keys(input.nodes);if(keys.length<2||keys.length>120)throw new Error('Use between 2 and 120 scenes.');
  const idOK=id=>/^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(id)&&!['__proto__','prototype','constructor'].includes(id);
  function scene(edit,id,isEnding=false){
   if(!object(edit))throw new Error('Invalid scene: '+id);
-  const label=edit.title||id;const imageOnly=edit.type==='image';if(imageOnly&&(isEnding||edit.end||id==='recovery'))throw new Error('This scene cannot use the image-only type.');
+  const label=edit.title||id;const imageOnly=edit.type==='image';if(imageOnly&&(isEnding||edit.end))throw new Error('This scene cannot use the image-only type.');
   const ch=edit.ch??null;if(ch!==null&&(!Number.isInteger(ch)||ch<0||ch>=result.chapters.length))throw new Error('Choose a chapter for '+label+'.');
   if(!imageOnly&&!Object.hasOwn(result.cast,edit.speaker))throw new Error('Choose a character for '+label+'.');
   const value={ch,speaker:imageOnly?'Yiwen':edit.speaker,title:text(edit.title,300,true,'Title for '+id),loc:text(edit.loc??'',300),narration:text(edit.narration??'',1500),line:text(edit.line??'',5000,!imageOnly,'Dialogue for '+label)};
@@ -32,7 +33,7 @@ function validateStory(input){
   if(edit.imageAlt)value.imageAlt=text(edit.imageAlt,300);
   if(imageOnly){value.type='image';if(!Array.isArray(edit.choices)||edit.choices.length!==1)throw new Error('Image scenes need one Next destination.');value.choices=[{text:'Next',next:text(edit.choices[0].next,100,true,'Next scene')}];return value;}
   if(isEnding||edit.end===true){value.end=true;return value;}
-  if(!Array.isArray(edit.choices)||edit.choices.length<1||edit.choices.length>(id==='recovery'?4:3))throw new Error(label+' needs 1–3 choices, or must be an ending.');
+  if(!Array.isArray(edit.choices)||edit.choices.length<1||edit.choices.length>3)throw new Error(label+' needs 1–3 choices, or must be an ending.');
   value.choices=edit.choices.map((choice,i)=>{
    if(!object(choice))throw new Error('Invalid choice in '+label+'.');
    const clean={text:text(choice.text,500,true,'Choice '+(i+1)+' in '+label),next:text(choice.next,100,true,'Destination in '+label),feedback:text(choice.feedback??'',800)};
@@ -45,9 +46,9 @@ function validateStory(input){
  result.nodes.ending=structuredClone(defaults.nodes.ending);
  for(const id of Object.keys(defaults.endings))result.endings[id]=scene(input.endings[id],id,true);
  const validTarget=target=>(target!=='recovery'&&Object.hasOwn(result.nodes,target))||(target.startsWith('ending:')&&Object.hasOwn(result.endings,target.slice(7)));
- for(const [id,node]of Object.entries(result.nodes))for(const choice of node.choices||[])if(!(id==='recovery'&&choice.next==='@resume')&&!validTarget(choice.next))throw new Error('Choose an existing destination for “'+choice.text+'” in '+node.title+'.');
+ for(const node of Object.values(result.nodes))for(const choice of node.choices||[])if(!validTarget(choice.next))throw new Error('Choose an existing destination for “'+choice.text+'” in '+node.title+'.');
  const reachable=new Set(),pending=['start'];while(pending.length){const id=pending.pop();if(reachable.has(id))continue;reachable.add(id);for(const choice of result.nodes[id]?.choices||[])pending.push(choice.next);}
- const finishable=new Set([...reachable].filter(id=>id==='@resume'||id==='ending'||id.startsWith('ending:')||result.nodes[id]?.end));
+ const finishable=new Set([...reachable].filter(id=>id==='ending'||id.startsWith('ending:')||result.nodes[id]?.end));
  let changed=true;while(changed){changed=false;for(const id of reachable)if(!finishable.has(id)&&(result.nodes[id]?.choices||[]).some(c=>finishable.has(c.next))){finishable.add(id);changed=true;}}
  const trapped=[...reachable].find(id=>!finishable.has(id));if(trapped)throw new Error('“'+result.nodes[trapped].title+'” has no route to an ending. Connect a choice to an ending or another scene with an exit.');
  result.sceneOrder=sceneOrder({...result,sceneOrder:input.sceneOrder});
@@ -55,7 +56,7 @@ function validateStory(input){
 }
 async function readBody(request,limit){if(Number(request.headers.get('Content-Length'))>limit)throw new Error('Request is too large.');const reader=request.body?.getReader();if(!reader)return new Uint8Array();const chunks=[];let size=0;while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit){await reader.cancel();throw new Error('Request is too large.');}chunks.push(value);}const result=new Uint8Array(size);let offset=0;for(const part of chunks){result.set(part,offset);offset+=part.length;}return result;}
 async function parseBody(request,limit){return JSON.parse(new TextDecoder().decode(await readBody(request,limit)));}
-async function story(env){const saved=await env.DB.prepare('SELECT revision, content, updated_at FROM story WHERE id = 1').first();return saved?{revision:saved.revision,content:withRecovery(JSON.parse(saved.content)),updatedAt:saved.updated_at}:{revision:0,content:defaults,updatedAt:null};}
+async function story(env){const saved=await env.DB.prepare('SELECT revision, content, updated_at FROM story WHERE id = 1').first();return saved?{revision:saved.revision,content:migrateLegacyStory(JSON.parse(saved.content)),updatedAt:saved.updated_at}:{revision:0,content:defaults,updatedAt:null};}
 function mediaType(bytes){if(bytes.length<12)return null;if(bytes[0]===137&&bytes[1]===80&&bytes[2]===78&&bytes[3]===71&&bytes[4]===13&&bytes[5]===10&&bytes[6]===26&&bytes[7]===10)return 'image/png';if(bytes[0]===255&&bytes[1]===216&&bytes[2]===255)return 'image/jpeg';if(new TextDecoder().decode(bytes.slice(0,4))==='RIFF'&&new TextDecoder().decode(bytes.slice(8,12))==='WEBP')return 'image/webp';return null;}
 async function handle(request,env){const url=new URL(request.url),path=url.pathname;
 if(path.startsWith('/api/')&&!['GET','HEAD'].includes(request.method)){if(request.headers.get('Origin')!==url.origin||request.headers.get('X-Editor-Request')!=='1')return json({error:'This request must come from the editor.'},403);}
