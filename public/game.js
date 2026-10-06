@@ -1,6 +1,7 @@
 let cast,chapters,items,nodes,endings,defaultImage;
 let ready=false;
 let pastStates=[];
+const failedArtwork=new Set(),warmedArtwork=new Set();
 let state={node:'start',bag:[],feedback:'',log:[]};
 const $=id=>document.getElementById(id);
 function current(){if(state.node.startsWith('ending:'))return {...endings[state.node.slice(7)]};if(state.node==='ending'&&!state.bag.includes('boba')&&['tea','milk','maple'].every(item=>state.bag.includes(item))&&nodes.scene_9634fffd222c4e74958ef0732ebb5450?.end)return {...nodes.scene_9634fffd222c4e74958ef0732ebb5450};if(state.node==='ending')return {...endings[['boba','tea','milk'].every(item=>state.bag.includes(item))?(state.bag.includes('maple')?'classic':'maple'):'clear']};return {...nodes[state.node]};}
@@ -15,7 +16,7 @@ function choose(index){
  render();return snapshot();
 }
 function snapshot(){if(!ready)throw new Error("The story is still loading.");const n=current();return {node:state.node,canGoBack:pastStates.length>0,type:n.type||'dialogue',speaker:n.type==='image'?null:n.speaker,dialogue:n.type==='image'?'':n.line,narration:n.narration||'',ingredients:[...state.bag],ending:!!n.end,choices:(n.choices||[]).map((x,i)=>({index:i,text:x.text}))};}
-function render(){$('previous').disabled=pastStates.length===0;const n=current(),person=cast[n.speaker]||cast.Yiwen;const imageOnly=n.type==='image';document.querySelector('.game').classList.toggle('image-only',imageOnly);document.querySelector('.world').setAttribute('aria-hidden',imageOnly?'false':'true');$('sceneArt').src=artworkUrl(n.image||defaultImage);$('sceneArt').alt=n.imageAlt||'Illustration for '+n.title;$('speaker').textContent=n.speaker;$('avatar').textContent=person.mark;$('role').textContent=person.role;$('location').textContent=n.loc;$('sceneTitle').textContent=n.title;$('chapterLabel').textContent=n.end?'THE END':n.ch===0?'PROLOGUE':'THE JOURNEY';$('sceneNumber').hidden=n.ch==null;$('sceneNumber').textContent=n.ch==null?'':`CH. 0${n.ch+1}`;$('narration').textContent=n.narration||'';$('imageNarration').textContent=imageOnly?n.narration||'':'';$('imageNarration').hidden=!imageOnly||!n.narration?.trim();writeLine(imageOnly?'':n.line);$('feedback').hidden=!state.feedback;$('feedback').textContent=state.feedback;$('progressText').textContent=n.ch==null?'Unchaptered scene':`0${n.ch+1} / 06`;$('ingredientCount').textContent=state.bag.length+' / 4';$('recipeHint').textContent=state.bag.length?"Your own recipe, one ingredient at a time.":"A little adventure begins with an empty cup.";
+function render(){$('previous').disabled=pastStates.length===0;const n=current(),person=cast[n.speaker]||cast.Yiwen;const imageOnly=n.type==='image';document.querySelector('.game').classList.toggle('image-only',imageOnly);document.querySelector('.world').setAttribute('aria-hidden',imageOnly?'false':'true');setArtwork(n);warmNextArtwork(n);$('speaker').textContent=n.speaker;$('avatar').textContent=person.mark;$('role').textContent=person.role;$('location').textContent=n.loc;$('sceneTitle').textContent=n.title;$('chapterLabel').textContent=n.end?'THE END':n.ch===0?'PROLOGUE':'THE JOURNEY';$('sceneNumber').hidden=n.ch==null;$('sceneNumber').textContent=n.ch==null?'':`CH. 0${n.ch+1}`;$('narration').textContent=n.narration||'';$('imageNarration').textContent=imageOnly?n.narration||'':'';$('imageNarration').hidden=!imageOnly||!n.narration?.trim();writeLine(imageOnly?'':n.line);$('feedback').hidden=!state.feedback;$('feedback').textContent=state.feedback;$('progressText').textContent=n.ch==null?'Unchaptered scene':`0${n.ch+1} / 06`;$('ingredientCount').textContent=state.bag.length+' / 4';$('recipeHint').textContent=state.bag.length?"Your own recipe, one ingredient at a time.":"A little adventure begins with an empty cup.";
  const visitedCh=new Set(state.log.map(entry=>entry.ch));$('chapters').replaceChildren(...chapters.map((text,i)=>{const li=document.createElement('li');li.className=i===n.ch?'active':visitedCh.has(i)?'done':'';if(i===n.ch)li.setAttribute('aria-current','step');const num=document.createElement('span');num.className='chapter-index';num.textContent=visitedCh.has(i)&&i!==n.ch?'✓':String(i+1);li.append(num,document.createTextNode(text));return li;}));
  $('ingredients').replaceChildren(...items.map(([key,icon,label])=>{const el=document.createElement('div');const have=state.bag.includes(key);el.className='ingredient'+(have?' have':'');el.setAttribute('aria-label',label+(have?" collected":" not collected"));const symbol=document.createElement('span');symbol.textContent=have?'✓':icon;symbol.setAttribute('aria-hidden','true');el.append(symbol,document.createTextNode(label));return el;}));
  document.querySelector('.game').classList.toggle('ending',!!n.end);$('choicePrompt').textContent=n.end?"Try different choices for another story.":'What will you say?';$('choiceKeys').textContent=n.end?'':'1 – '+n.choices.length;$('choices').replaceChildren();if(n.end){const b=document.createElement('button');b.className='choice';b.textContent="Begin a new cup’s story";b.onclick=reset;$('choices').append(b);}else{n.choices.forEach((choice,i)=>{const b=document.createElement('button');b.className='choice';const num=document.createElement('span');num.className='choice-num';num.textContent=String(i+1);num.setAttribute('aria-hidden','true');b.append(num,document.createTextNode(imageOnly?'Next':choice.text));b.onclick=()=>choose(i);$('choices').append(b);});}}
@@ -35,8 +36,8 @@ async function loadStory(){
  try{
   const response=await fetch('/api/story',{cache:'no-store'});if(!response.ok)throw new Error('Could not load the saved story.');
   const {content}=await response.json();({cast,chapters,items,nodes,endings}=content);defaultImage=content.image;
-  const art=$('sceneArt');art.src=artworkUrl(current().image||defaultImage);art.alt=current().imageAlt||'Illustration for '+current().title;
-  let timeout;try{await Promise.race([art.decode(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Image load timed out')),20000);})]);}finally{clearTimeout(timeout);}
+  const art=$('sceneArt');setArtwork(current());
+  let timeout;try{await Promise.race([art.decode(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Image load timed out')),8000);})]);}catch{failedArtwork.add(artworkUrl(current().image||defaultImage));setArtwork(current());}finally{clearTimeout(timeout);}
   ready=true;render();$('loadingScreen').hidden=true;$('gameStage').hidden=false;
  }catch(error){ready=false;$('loadingMessage').textContent='The opening scene could not load. Please try again.';$('loadingRetry').hidden=false;}
 }
@@ -52,6 +53,40 @@ $('fullscreen').hidden=!document.fullscreenEnabled;
 $('fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{$('fullscreen').hidden=true;}};
 document.addEventListener('fullscreenchange',()=>{$('fullscreen').setAttribute('aria-label',document.fullscreenElement?'Exit fullscreen':'Enter fullscreen');});
 for(const id of ['menuModal','journalModal'])$(id).addEventListener('click',event=>{if(event.target!==$(id))return;const r=$(id).getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)$(id).close();});
+$('sceneArt').addEventListener('error',()=>{
+ const art=$('sceneArt');
+ failedArtwork.add(art.getAttribute('src'));
+ if(art.getAttribute('src')!==artworkUrl('/scene.png')){
+  art.src=artworkUrl('/scene.png');
+  art.alt='Storybook background';
+ }
+});
 loadStory();
 
 function artworkUrl(path){return path==='/scene.png'?path+'?art=storybook-ui-v2':path;}
+
+
+function setArtwork(scene) {
+ const art = $('sceneArt');
+ const requested = artworkUrl(scene.image || defaultImage);
+ const unavailable = failedArtwork.has(requested);
+ const source = unavailable ? artworkUrl('/scene.png') : requested;
+ if (art.getAttribute('src') !== source) art.src = source;
+ art.alt = unavailable ? 'Storybook background' : scene.imageAlt || 'Illustration for ' + scene.title;
+}
+
+// Fetch only the immediate destinations while the player reads the current scene.
+function warmNextArtwork(scene) {
+ for (const choice of scene.choices || []) {
+  const next = choice.next.startsWith('ending:') ? endings[choice.next.slice(7)] : nodes[choice.next];
+  if (!next || choice.next === 'ending') continue;
+  const source = artworkUrl(next.image || defaultImage);
+  if (warmedArtwork.has(source) || failedArtwork.has(source)) continue;
+  warmedArtwork.add(source);
+  const image = new Image();
+  image.decoding = 'async';
+  image.fetchPriority = 'low';
+  image.onerror = () => warmedArtwork.delete(source);
+  image.src = source;
+ }
+}
