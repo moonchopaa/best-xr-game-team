@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import worker, { validateStory } from '../dist/server/index.js';
+import worker, { validateStory, audioType } from '../dist/server/index.js';
 
 const defaults = JSON.parse(await readFile(new URL('../server/default-story.json', import.meta.url)));
 const draft = () => structuredClone(defaults);
@@ -100,4 +100,57 @@ test('all sixteen ingredient combinations preserve the four recipe outcomes', ()
       : mask === 7 ? defaults.endings.maple : defaults.endings.clear;
     assert.equal(endingFor(bag).title, expected.title, `ingredients: ${bag}`);
   }
+});
+
+test('scene voice clips survive validation and reject anything else', () => {
+  const input = draft();
+  input.nodes.start.voice = '/voice/3280224d-bc84-4b51-889c-880c994f0240';
+  assert.equal(validateStory(input).nodes.start.voice, input.nodes.start.voice);
+
+  for (const bad of ['/media/3280224d-bc84-4b51-889c-880c994f0240', '/voice/../secret', 'https://example.test/clip.mp3']) {
+    const broken = draft();
+    broken.nodes.start.voice = bad;
+    assert.throws(() => validateStory(broken), /Invalid voice clip/);
+  }
+});
+
+test('endings and image-only scenes may also carry a voice clip', () => {
+  const clip = '/voice/3280224d-bc84-4b51-889c-880c994f0240';
+  const input = draft();
+  input.endings.clear.voice = clip;
+  input.nodes.library.voice = clip;
+  const clean = validateStory(input);
+  assert.equal(clean.endings.clear.voice, clip);
+  assert.equal(clean.nodes.library.type, 'image');
+  assert.equal(clean.nodes.library.voice, clip);
+});
+
+test('uploaded audio is recognised by its header, not its file name', () => {
+  const header = bytes => audioType(new Uint8Array([...bytes, ...Array(12).fill(0)]));
+  assert.equal(header([0x49, 0x44, 0x33]), 'audio/mpeg');
+  assert.equal(header([0xff, 0xfb]), 'audio/mpeg');
+  assert.equal(header([...'RIFF'].map(c => c.charCodeAt(0)).concat([0, 0, 0, 0], [...'WAVE'].map(c => c.charCodeAt(0)))), 'audio/wav');
+  assert.equal(header([0, 0, 0, 0, ...[...'ftyp'].map(c => c.charCodeAt(0))]), 'audio/mp4');
+  assert.equal(header([...'OggS'].map(c => c.charCodeAt(0))), 'audio/ogg');
+  assert.equal(header([0x1a, 0x45, 0xdf, 0xa3]), 'audio/webm');
+  // A JPEG also starts with 0xff, so it must not be mistaken for an MP3 frame.
+  assert.equal(header([0xff, 0xd8, 0xff]), null);
+});
+
+test('the original story stays available after the saved story is replaced', async () => {
+  const wrecked = draft();
+  wrecked.nodes.start.title = 'Replaced';
+  const env = { DB: { prepare: () => ({ first: async () => ({
+    revision: 4, content: JSON.stringify(wrecked), updated_at: '2026-01-01T00:00:00Z',
+  }) }) } };
+
+  const saved = await (await worker.fetch(new Request('https://example.test/api/story'), env)).json();
+  assert.equal(saved.content.nodes.start.title, 'Replaced');
+
+  const original = await worker.fetch(new Request('https://example.test/api/story/original'), env);
+  assert.equal(original.status, 200);
+  const body = await original.json();
+  assert.equal(body.content.nodes.start.title, defaults.nodes.start.title);
+  // It is a restore source, not a save: it carries no revision to save against.
+  assert.equal(body.revision, undefined);
 });

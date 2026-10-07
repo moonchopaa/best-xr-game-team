@@ -10,6 +10,7 @@ async function signed(payload,secret){return hex(await crypto.subtle.sign('HMAC'
 async function equal(a,b){const [aHash,bHash]=await Promise.all([digest(a),digest(b)]);let difference=0;for(let i=0;i<aHash.length;i++)difference|=aHash.charCodeAt(i)^bHash.charCodeAt(i);return difference===0;}
 async function authenticated(request,env){if(!env.EDITOR_SESSION_SECRET)return false;const token=(request.headers.get('Cookie')||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'='))?.slice(cookieName.length+1);if(!token)return false;const [expiry,nonce,sig,...extra]=token.split('.');if(extra.length||!/^\d+$/.test(expiry)||!/^[-a-zA-Z0-9]+$/.test(nonce||'')||!/^[a-f0-9]{64}$/.test(sig||'')||Number(expiry)<Date.now()||Number(expiry)>Date.now()+43201000)return false;const bytes=new Uint8Array(sig.match(/../g).map(x=>parseInt(x,16)));return crypto.subtle.verify('HMAC',await key(env.EDITOR_SESSION_SECRET),bytes,encoder.encode(expiry+'.'+nonce));}
 function imagePath(value){return typeof value==='string'&&((Object.hasOwn(assets,value)&&assets[value].type.startsWith('image/'))||/^\/media\/[a-f0-9-]{36}$/.test(value));}
+function voicePath(value){return typeof value==='string'&&/^\/voice\/[a-f0-9-]{36}$/.test(value);}
 function sceneOrder(content){const keys=[...Object.keys(content.nodes).filter(id=>id!=='ending').map(id=>'nodes:'+id),...Object.keys(content.endings).map(id=>'endings:'+id)];return [...new Set([...(Array.isArray(content.sceneOrder)?content.sceneOrder:[]),...keys])].filter(key=>keys.includes(key));}
 // Compatibility for saved stories from the retired energy/recovery edition.
 function migrateLegacyStory(content){content=structuredClone(content);delete content.nodes.recovery;for(const group of ['nodes','endings'])for(const scene of Object.values(content[group]))for(const choice of scene.choices||[])delete choice.energy;content.sceneOrder=sceneOrder(content);return content;}
@@ -31,6 +32,7 @@ function validateStory(input){
   const value={ch,speaker:imageOnly?'Yiwen':edit.speaker,title:text(edit.title,300,true,'Title for '+id),loc:text(edit.loc??'',300),narration:text(edit.narration??'',1500),line:text(edit.line??'',5000,!imageOnly,'Dialogue for '+label)};
   if(edit.image){if(!imagePath(edit.image))throw new Error('Invalid image in '+label+'.');value.image=edit.image;}
   if(edit.imageAlt)value.imageAlt=text(edit.imageAlt,300);
+  if(edit.voice){if(!voicePath(edit.voice))throw new Error('Invalid voice clip in '+label+'.');value.voice=edit.voice;}
   if(imageOnly){value.type='image';if(!Array.isArray(edit.choices)||edit.choices.length!==1)throw new Error('Image scenes need one Next destination.');value.choices=[{text:'Next',next:text(edit.choices[0].next,100,true,'Next scene')}];return value;}
   if(isEnding||edit.end===true){value.end=true;return value;}
   if(!Array.isArray(edit.choices)||edit.choices.length<1||edit.choices.length>3)throw new Error(label+' needs 1–3 choices, or must be an ending.');
@@ -58,9 +60,11 @@ async function readBody(request,limit){if(Number(request.headers.get('Content-Le
 async function parseBody(request,limit){return JSON.parse(new TextDecoder().decode(await readBody(request,limit)));}
 async function story(env){const saved=await env.DB.prepare('SELECT revision, content, updated_at FROM story WHERE id = 1').first();return saved?{revision:saved.revision,content:migrateLegacyStory(JSON.parse(saved.content)),updatedAt:saved.updated_at}:{revision:0,content:defaults,updatedAt:null};}
 function mediaType(bytes){if(bytes.length<12)return null;if(bytes[0]===137&&bytes[1]===80&&bytes[2]===78&&bytes[3]===71&&bytes[4]===13&&bytes[5]===10&&bytes[6]===26&&bytes[7]===10)return 'image/png';if(bytes[0]===255&&bytes[1]===216&&bytes[2]===255)return 'image/jpeg';if(new TextDecoder().decode(bytes.slice(0,4))==='RIFF'&&new TextDecoder().decode(bytes.slice(8,12))==='WEBP')return 'image/webp';return null;}
+function audioType(bytes){if(bytes.length<12)return null;const ascii=(start,end)=>new TextDecoder().decode(bytes.slice(start,end));if(ascii(0,3)==='ID3'||(bytes[0]===255&&(bytes[1]&224)===224))return 'audio/mpeg';if(ascii(0,4)==='RIFF'&&ascii(8,12)==='WAVE')return 'audio/wav';if(ascii(4,8)==='ftyp')return 'audio/mp4';if(ascii(0,4)==='OggS')return 'audio/ogg';if(bytes[0]===26&&bytes[1]===69&&bytes[2]===223&&bytes[3]===163)return 'audio/webm';return null;}
 async function handle(request,env){const url=new URL(request.url),path=url.pathname;
 if(path.startsWith('/api/')&&!['GET','HEAD'].includes(request.method)){if(request.headers.get('Origin')!==url.origin||request.headers.get('X-Editor-Request')!=='1')return json({error:'This request must come from the editor.'},403);}
 if(path==='/api/story'&&request.method==='GET')return json(await story(env));
+if(path==='/api/story/original'&&request.method==='GET')return json({content:defaults});
 if(path==='/api/editor/session'&&request.method==='GET')return json({authenticated:await authenticated(request,env)});
 if(path==='/api/editor/login'&&request.method==='POST'){
  if(!env.EDITOR_PASSWORD||!env.EDITOR_SESSION_SECRET)return json({error:'The editor is not configured yet.'},503);
@@ -76,9 +80,12 @@ if(path.startsWith('/api/editor/')){
   const updatedAt=new Date().toISOString();const saved=await env.DB.prepare('INSERT INTO story (id, revision, content, updated_at) SELECT 1, 1, ?, ? WHERE ? = 0 ON CONFLICT(id) DO NOTHING RETURNING revision').bind(JSON.stringify(content),updatedAt,data.revision).first();let result=saved;if(!result&&data.revision>0)result=await env.DB.prepare('UPDATE story SET revision = revision + 1, content = ?, updated_at = ? WHERE id = 1 AND revision = ? RETURNING revision').bind(JSON.stringify(content),updatedAt,data.revision).first();if(!result)return json({error:'Someone else saved changes. Your draft is still here. Reload the latest version before saving again.',conflict:true},409);return json({revision:result.revision,updatedAt});
  }
  if(path==='/api/editor/upload'&&request.method==='POST'){
-  let bytes;try{bytes=await readBody(request,5*1024*1024);}catch{return json({error:'Choose an image smaller than 5 MB.'},413);}const type=mediaType(bytes);if(!type)return json({error:'Choose a PNG, JPEG, or WebP image.'},415);const id=crypto.randomUUID();await env.BUCKET.put('images/'+id,bytes,{httpMetadata:{contentType:type}});return json({url:'/media/'+id});
+  let bytes;try{bytes=await readBody(request,10*1024*1024);}catch{return json({error:'Choose a file smaller than 10 MB.'},413);}const image=mediaType(bytes),sound=image?null:audioType(bytes);if(!image&&!sound)return json({error:'Choose a PNG, JPEG, or WebP image, or an MP3, WAV, M4A, OGG, or WebM voice clip.'},415);if(image&&bytes.length>5*1024*1024)return json({error:'Choose an image smaller than 5 MB.'},413);const id=crypto.randomUUID();await env.BUCKET.put((image?'images/':'audio/')+id,bytes,{httpMetadata:{contentType:image||sound}});return json({url:(image?'/media/':'/voice/')+id,kind:image?'image':'voice'});
  }
  return json({error:'Not found.'},404);
+}
+if(path.startsWith('/voice/')&&request.method==='GET'){
+ if(!voicePath(path))return new Response('Not found',{status:404});const clip=await env.BUCKET.get('audio/'+path.slice(7));if(!clip)return new Response('Not found',{status:404});return new Response(clip.body,{headers:{'Content-Type':clip.httpMetadata?.contentType||'audio/mpeg','Cache-Control':'public, max-age=31536000, immutable','X-Content-Type-Options':'nosniff'}});
 }
 if(path.startsWith('/media/')&&request.method==='GET'){
  if(!imagePath(path))return new Response('Not found',{status:404});const image=await env.BUCKET.get('images/'+path.slice(7));if(!image){const original=await fetch('https://a-sip-of-home-story.mchopaa.chatgpt.site'+path);return new Response(original.body,{status:original.status,headers:{'Content-Type':original.headers.get('Content-Type')||'image/png','Cache-Control':'public, max-age=86400'}});}return new Response(image.body,{headers:{'Content-Type':image.httpMetadata?.contentType||'application/octet-stream','Cache-Control':'public, max-age=31536000, immutable','X-Content-Type-Options':'nosniff'}});
@@ -86,4 +93,4 @@ if(path.startsWith('/media/')&&request.method==='GET'){
 if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405});const asset=assets[path==='/'?'/index.html':path==='/edit'||path==='/edit/'?'/editor.html':path];if(!asset)return new Response('Not found',{status:404});const body=asset.base64?Uint8Array.from(atob(asset.body),c=>c.charCodeAt(0)):asset.body;return new Response(request.method==='HEAD'?null:body,{headers:{'Content-Type':asset.type,'Cache-Control':path==='/scene.png'?'public, max-age=86400':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'SAMEORIGIN'}});
 }
 export default {async fetch(request,env){try{return await handle(request,env);}catch(error){console.error('Site request failed',error?.message);return json({error:'The service is temporarily unavailable. Your draft has not been discarded. Please try again.'},503);}}};
-export {validateStory,mediaType};
+export {validateStory,mediaType,audioType};

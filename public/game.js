@@ -16,7 +16,7 @@ function choose(index){
  render();return snapshot();
 }
 function snapshot(){if(!ready)throw new Error("The story is still loading.");const n=current();return {node:state.node,canGoBack:pastStates.length>0,type:n.type||'dialogue',speaker:n.type==='image'?null:n.speaker,dialogue:n.type==='image'?'':n.line,narration:n.narration||'',ingredients:[...state.bag],ending:!!n.end,choices:(n.choices||[]).map((x,i)=>({index:i,text:x.text}))};}
-function render(){$('previous').disabled=pastStates.length===0;const n=current(),person=cast[n.speaker]||cast.Yiwen;const imageOnly=n.type==='image';document.querySelector('.game').classList.toggle('image-only',imageOnly);document.querySelector('.world').setAttribute('aria-hidden',imageOnly?'false':'true');setArtwork(n);warmNextArtwork(n);$('speaker').textContent=n.speaker;$('avatar').textContent=person.mark;$('role').textContent=person.role;$('location').textContent=n.loc;$('sceneTitle').textContent=n.title;$('chapterLabel').textContent=n.end?'THE END':n.ch===0?'PROLOGUE':'THE JOURNEY';$('sceneNumber').hidden=n.ch==null;$('sceneNumber').textContent=n.ch==null?'':`CH. 0${n.ch+1}`;$('narration').textContent=n.narration||'';$('imageNarration').textContent=imageOnly?n.narration||'':'';$('imageNarration').hidden=!imageOnly||!n.narration?.trim();writeLine(imageOnly?'':n.line);$('feedback').hidden=!state.feedback;$('feedback').textContent=state.feedback;$('progressText').textContent=n.ch==null?'Unchaptered scene':`0${n.ch+1} / 06`;$('ingredientCount').textContent=state.bag.length+' / 4';$('recipeHint').textContent=state.bag.length?"Your own recipe, one ingredient at a time.":"A little adventure begins with an empty cup.";
+function render(){$('previous').disabled=pastStates.length===0;const n=current(),person=cast[n.speaker]||cast.Yiwen;const imageOnly=n.type==='image';document.querySelector('.game').classList.toggle('image-only',imageOnly);document.querySelector('.world').setAttribute('aria-hidden',imageOnly?'false':'true');setArtwork(n);warmNextArtwork(n);setVoice(n);$('speaker').textContent=n.speaker;$('avatar').textContent=person.mark;$('role').textContent=person.role;$('location').textContent=n.loc;$('sceneTitle').textContent=n.title;$('chapterLabel').textContent=n.end?'THE END':n.ch===0?'PROLOGUE':'THE JOURNEY';$('sceneNumber').hidden=n.ch==null;$('sceneNumber').textContent=n.ch==null?'':`CH. 0${n.ch+1}`;$('narration').textContent=n.narration||'';$('imageNarration').textContent=imageOnly?n.narration||'':'';$('imageNarration').hidden=!imageOnly||!n.narration?.trim();writeLine(imageOnly?'':n.line);$('feedback').hidden=!state.feedback;$('feedback').textContent=state.feedback;$('progressText').textContent=n.ch==null?'Unchaptered scene':`0${n.ch+1} / 06`;$('ingredientCount').textContent=state.bag.length+' / 4';$('recipeHint').textContent=state.bag.length?"Your own recipe, one ingredient at a time.":"A little adventure begins with an empty cup.";
  const visitedCh=new Set(state.log.map(entry=>entry.ch));$('chapters').replaceChildren(...chapters.map((text,i)=>{const li=document.createElement('li');li.className=i===n.ch?'active':visitedCh.has(i)?'done':'';if(i===n.ch)li.setAttribute('aria-current','step');const num=document.createElement('span');num.className='chapter-index';num.textContent=visitedCh.has(i)&&i!==n.ch?'✓':String(i+1);li.append(num,document.createTextNode(text));return li;}));
  $('ingredients').replaceChildren(...items.map(([key,icon,label])=>{const el=document.createElement('div');const have=state.bag.includes(key);el.className='ingredient'+(have?' have':'');el.setAttribute('aria-label',label+(have?" collected":" not collected"));const symbol=document.createElement('span');symbol.textContent=have?'✓':icon;symbol.setAttribute('aria-hidden','true');el.append(symbol,document.createTextNode(label));return el;}));
  document.querySelector('.game').classList.toggle('ending',!!n.end);$('choicePrompt').textContent=n.end?"Try different choices for another story.":'What will you say?';$('choiceKeys').textContent=n.end?'':'1 – '+n.choices.length;$('choices').replaceChildren();if(n.end){const b=document.createElement('button');b.className='choice';b.textContent="Begin a new cup’s story";b.onclick=reset;$('choices').append(b);}else{n.choices.forEach((choice,i)=>{const b=document.createElement('button');b.className='choice';const num=document.createElement('span');num.className='choice-num';num.textContent=String(i+1);num.setAttribute('aria-hidden','true');b.append(num,document.createTextNode(imageOnly?'Next':choice.text));b.onclick=()=>choose(i);$('choices').append(b);});}}
@@ -63,6 +63,31 @@ $('sceneArt').addEventListener('error',()=>{
 });
 loadStory();
 
+// Scene voice. Autoplay is blocked until the player interacts, so the replay
+// button stays available whenever the scene has a clip.
+function setVoice(scene) {
+ const player = $('sceneVoice'), clip = scene.voice || '';
+ if (player.getAttribute('src') !== clip) {
+  player.pause();
+  if (clip) player.src = clip;
+  else if (player.hasAttribute('src')) { player.removeAttribute('src'); player.load(); }
+ }
+ $('replayVoice').hidden = !clip;
+ if (clip) playVoice();
+}
+
+function playVoice() {
+ const player = $('sceneVoice');
+ if (!player.getAttribute('src') || window.sipAudio?.voiceEnabled === false) return;
+ try { player.currentTime = 0; } catch {}
+ window.sipAudio?.duck(true);
+ player.play().catch(() => window.sipAudio?.duck(false));
+}
+
+$('replayVoice').onclick = playVoice;
+for (const event of ['ended', 'pause', 'error']) $('sceneVoice').addEventListener(event, () => window.sipAudio?.duck(false));
+document.addEventListener('sip-voice', event => { if (event.detail.enabled) playVoice(); else $('sceneVoice').pause(); });
+
 function artworkUrl(path){return path==='/scene.png'?path+'?art=storybook-ui-v2':path;}
 
 
@@ -90,3 +115,4 @@ function warmNextArtwork(scene) {
   image.src = source;
  }
 }
+// --- end of artwork helpers ---

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "dev": "npm run build && node scripts/dev.mjs",
     "db:generate": "drizzle-kit generate",
     "test": "npm run build && node --test"
   },
