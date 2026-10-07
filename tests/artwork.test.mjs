@@ -7,7 +7,7 @@ const source = await readFile(new URL('../public/game.js', import.meta.url), 'ut
 // Bounded on both sides so unrelated additions to game.js cannot leak in here.
 const helpers = source.slice(source.indexOf('function artworkUrl('), source.indexOf('// --- end of artwork helpers ---'));
 const loader = source.slice(source.indexOf('async function loadStory('), source.indexOf("$('loadingRetry').onclick"));
-function fixture() {
+function fixture({started = false} = {}) {
  const elements = new Map();
  const requested = [];
  const art = { source: '', alt: '', assignments: 0,
@@ -23,7 +23,7 @@ function fixture() {
  const context = vm.createContext({
   $: id => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); },
   failedArtwork: new Set(), warmedArtwork: new Set(), defaultImage: story.image,
-  nodes: story.nodes, endings: story.endings, ready: false,
+  nodes: story.nodes, endings: story.endings, ready: false, started,
   current: () => story.nodes.start,
   render() { context.setArtwork(story.nodes.start); },
   fetch: async () => ({ok:true, json:async()=>({content:story})}),
@@ -51,7 +51,7 @@ test('failed artwork uses the bundled background on subsequent renders', () => {
 });
 
 test('an opening image failure does not block the playable story', async () => {
- const {context, art, elements} = fixture();
+ const {context, art, elements} = fixture({started: true});
  art.decode = async () => { throw new Error('Image unavailable'); };
  await context.loadStory();
  assert.equal(context.ready, true);
@@ -67,6 +67,23 @@ test('a failed story API request still displays the retry control', async () => 
  assert.equal(context.ready, false);
  assert.equal(elements.get('gameStage').hidden, true);
  assert.equal(elements.get('loadingRetry').hidden, false);
+});
+
+test('the cover keeps the stage hidden while the story preloads behind it', async () => {
+ const {context, elements} = fixture();
+ await context.loadStory();
+ assert.equal(context.ready, true);
+ assert.equal(elements.get('coverScreen').hidden, false);
+ assert.equal(elements.get('gameStage').hidden, true);
+ assert.equal(elements.get('coverStatus').textContent, '');
+});
+
+test('a story that fails to load offers a retry on the cover', async () => {
+ const {context, elements} = fixture();
+ context.fetch = async () => ({ok:false});
+ await context.loadStory();
+ assert.equal(elements.get('coverRetry').hidden, false);
+ assert.equal(elements.get('beginGame').hidden, true);
 });
 
 test('only immediate artwork is preloaded once at low priority', () => {
