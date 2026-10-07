@@ -51,4 +51,6 @@ The game has dialogue scenes, image-only scenes, ingredient rewards, direct endi
 
 Many default scenes use `/media/<uuid>` images that are **not included in this repository**. The worker reads these from `BUCKET`, falling back to the original hosted site when an object is missing. A self-contained deployment needs those media objects migrated to its bucket; cloning and building alone does not copy them.
 
+The title cover is the first screen players see. Its background is `public/cover.jpg` and its wordmark is `public/logo.png`; both are bundled by `npm run build` like any other asset. If the background is missing the cover falls back to `public/place-cafe.jpg`. The wordmark reads "Bubble Tea Story" while the rest of the game is titled "A Sip of Home"; the cover heading keeps the latter as its accessible name. The story is fetched and the opening image decoded while the cover is up, so Begin usually goes straight into the first scene.
+
 The editor's reset-image action still uses the bundled place images. Do not remove artwork solely because the current story displays uploaded images instead.
